@@ -22,11 +22,11 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "usb_device.h"
-#include "_delay.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdint.h>
+#include "_rand.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,7 +45,16 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-osThreadId defaultTaskHandle;
+osThreadId Gatekeeper_handle;
+osThreadId Print1_handle;
+osThreadId Print2_handle;
+osMessageQId xPrint_queue_handle;
+static const char *pcStrings_to_string[] = {
+  "\r\nTask1 -----------------",
+  "\r\nTask2 *****************",
+  "\r\nMessage printed from the tick hook."
+};
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -53,7 +62,8 @@ osThreadId defaultTaskHandle;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-void StartDefaultTask(void const * argument);
+void prvStdio_gatekeeper_task(void const * argument);
+void prvPrint_task(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -93,7 +103,11 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  /* init code for USB_DEVICE */
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+
+  vSrand(567);
 
   /* USER CODE END 2 */
 
@@ -109,14 +123,27 @@ int main(void)
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
 
+  /* Create the queue(s) */
+  /* definition and creation of xPrint_queue */
+  osMessageQDef(xPrint_queue, 5, char *);
+  xPrint_queue_handle = osMessageCreate(osMessageQ(xPrint_queue), NULL);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of defaultTask */
-  osThreadDef(defaultTask, StartDefaultTask, osPriorityNormal, 0, 128);
-  defaultTaskHandle = osThreadCreate(osThread(defaultTask), NULL);
+  /* definition and creation of Gatekeeper */
+  osThreadDef(Gatekeeper, prvStdio_gatekeeper_task, osPriorityNormal, 0, 100);
+  Gatekeeper_handle = osThreadCreate(osThread(Gatekeeper), NULL);
+
+  /* definition and creation of Print1 */
+  osThreadDef(Print1, prvPrint_task, osPriorityNormal, 0, 100);
+  Print1_handle = osThreadCreate(osThread(Print1), (void*) 0);
+
+  /* definition and creation of Print2 */
+  osThreadDef(Print2, prvPrint_task, osPriorityAboveNormal, 0, 100);
+  Print2_handle = osThreadCreate(osThread(Print2), (void*) 1);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -198,30 +225,62 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void vApplicationTickHook()
+{
+  static uint32_t ulCount = 0;
+
+  ulCount++;
+  if(ulCount >= 200)
+  {
+    osMessagePut(xPrint_queue_handle, (uint32_t) pcStrings_to_string[2], 0);
+    ulCount = 0;
+  }
+}
+
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartDefaultTask */
+/* USER CODE BEGIN Header_prvStdio_gatekeeper_task */
 /**
-  * @brief  Function implementing the defaultTask thread.
+  * @brief  Function implementing the Gatekeeper thread.
   * @param  argument: Not used 
   * @retval None
   */
-/* USER CODE END Header_StartDefaultTask */
-void StartDefaultTask(void const * argument)
+/* USER CODE END Header_prvStdio_gatekeeper_task */
+void prvStdio_gatekeeper_task(void const * argument)
 {
-    
-    
-                 
-  /* init code for USB_DEVICE */
-  MX_USB_DEVICE_Init();
-
   /* USER CODE BEGIN 5 */
+  char *pcMessage_to_print;
+  osEvent eGatekeeper_event;
   /* Infinite loop */
   for(;;)
   {
-    _delay_ms(1);
+    eGatekeeper_event = osMessageGet(xPrint_queue_handle, osWaitForever);
+    pcMessage_to_print = (char *) eGatekeeper_event.value.v;
+
+    printf(pcMessage_to_print);
   }
   /* USER CODE END 5 */ 
+}
+
+/* USER CODE BEGIN Header_prvPrint_task */
+/**
+* @brief Function implementing the Print1 thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_prvPrint_task */
+void prvPrint_task(void const * argument)
+{
+  /* USER CODE BEGIN prvPrint_task */
+  uint32_t ulIndex_to_string = (uint32_t) argument;
+  /* Infinite loop */
+  for(;;)
+  {
+    osMessagePut(xPrint_queue_handle, (uint32_t) pcStrings_to_string[ulIndex_to_string], 0);
+
+    osDelay(1 + (ulRand() % 999));    
+  }
+  /* USER CODE END prvPrint_task */
 }
 
 /**
